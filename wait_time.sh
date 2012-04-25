@@ -1,4 +1,5 @@
 #!/bin/bash
+
 flip(){
 	temp=${waits[$1]}
 	waits[$1]=${waits[$2]}
@@ -19,18 +20,89 @@ bubblesort(){
 	done
 }
 
-GMETRIC="/usr/bin/gmetric"
-OUTPUT=`condor_q | tail -1`
-RUNNING=`echo $OUTPUT | cut -d ',' -f2 | cut -d ' ' -f2`
-IDLE=`echo $OUTPUT | cut -d ';' -f2 | cut -d ' ' -f2`
-$GMETRIC -n Condor_Jobs_Running -v $RUNNING -t uint16 -u 'Jobs'
-$GMETRIC -n Condor_Queue_Length -v $IDLE -t uint16 -u 'Jobs'
+userPos=0
+priorityPos=0
+resourcesPos=0
+while read line
+do
+	if [[ "$line" == *"@"* ]]; then
+		echo $line
+		count=0
+		for i in $line
+		do
+			if [ $count -eq 0 ]; then
+				user[$userPos]=$i
+				let userPos+=1
+			elif [ $count -eq 1 ]; then
+				priority[$priorityPos]=$i
+				let priorityPos+=1
+			elif [ $count -eq 4 ]; then
+				resources[$resourcesPos]=$i
+				let resourcesPos+=1
+			fi
+			let count+=1	
+		done
+	fi
+done <<< "`condor_userprio -all`"
+
+# filter out users who are running jobs
+count=0
+runningUsersPos=0
+runningPrioPos=0
+userLowPos=0
+userHighPos=0
+totalJobs=0
+for i in ${resources[@]}
+do
+	echo $i
+	if [ $i -gt 0 ]; then
+		runningUsers[$runningUsersPos]=`echo ${user[$count]} | cut -d '@' -f1`
+		runningPrio[$runningPrioPos]=${priority[$count]} 
+		userLow[$userLowPos]=`expr $totalJobs + 1`
+		let totalJobs+=$i
+		userHigh[$userHighPos]=$totalJobs
+		let runningUsersPos+=1
+		let runningPrioPos+=1
+		let userLowPos+=1
+		let userHighPos+=1
+	fi
+	let count+=1
+done
+count=0
+for i in ${runningUsers[@]}
+do
+	echo "$i ${runningPrio[$count]} ${userLow[$count]} ${userHigh[$count]}"
+	let count+=1
+done
+
+let MODULUS=$totalJobs%2
+if [ $MODULUS -eq 0 ]; then			# if number of jobs is even, take the average of 2 middle
+	let half=$totalJobs/2			# values to get the median
+	highMid=$half
+	lowMid=$half-1
+	median=`echo "($highMid+$lowMid)/2" | bc -l`
+	echo "High Middle: $highMid"
+	echo "Low Middle: $lowMid"
+	echo "Median Job Number: $median"
+else
+	let half=$totalJobs/2			# if number of jobs is odd, median is middle value
+	median=$half
+	echo "Median Job Number: $median"
+fi
+
+count=0
+for i in ${runningUsers[@]}
+do
+	if [ ${userLow[$count]} -le $median ] && [ ${userHigh[$count]} -ge $median ]; then
+		middleUser=$i
+	fi 
+done
+
 COUNT=0
 arrayPos=0
 currentTime=`date +%s`
 while read line
 do
-	if [ $COUNT -gt 3 ]; then
 		INNER=0
 		if [[ "$line" == *"slot"* ]]; then 
 			for i in $line
@@ -108,11 +180,7 @@ do
 				let INNER+=1
         	        done
 		fi
-		else
-			let COUNT+=1
-		fi
-done <<< "`condor_q -run`"
-#done <<< "`condor_q -constraint "JobStatus == 2"`"
+done <<< "`condor_q -run | grep ${runningUsers[0]}`"
 
 totalWait=0
 for i in ${waits[@]}
@@ -121,7 +189,7 @@ do
 done
 if [ $arrayPos -gt 0 ]; then
 	avgWait=`expr $totalWait / $arrayPos`		# As stated earlier arrayPos is array length at end
-	echo "Average Wait: $avgWait"
+	echo "If Effective Priority <= ${runningPrio[0]}, the average wait is: $avgWait"
 	bubblesort
 	let MODULUS=$arrayPos%2
 	if [ $MODULUS -eq 0 ]; then			# if number of jobs is even, take the average of 2 middle
@@ -181,7 +249,4 @@ if [ $arrayPos -gt 0 ]; then
 else
 	exit 0
 fi
-#for i in ${waits[@]}
-#do
-#        echo $i
-#done
+
