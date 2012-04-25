@@ -105,14 +105,17 @@ done <<< "`condor_q -run | grep $1`"
 
 calculateStatistics(){
 	totalWait=0
-for i in ${waits[@]}
+for (( i=0;i<arrayPos-1;i++))
 do
-	let totalWait+=$i
+	let totalWait+=${waits[$i]}
 done
 if [ $arrayPos -gt 0 ]; then
 	avgWait=`expr $totalWait / $arrayPos`		# As stated earlier arrayPos is array length at end
-	if [ $2 -eq 0 ]; then
+	check=`echo "($2+0.5)/1" | bc`
+	if [[ $check -eq 0 ]]; then
 		echo "If Effective Priority <= $1, the average wait is: $avgWait"
+	elif [[ $check -eq 1 ]]; then
+		echo "If Effective Priority > $1, the average wait is: $avgWait"
 	else
 		echo "If Effective Priority is > $2 and <= $1, the average wait is: $avgWait"
 	fi
@@ -275,7 +278,7 @@ calculateStatistics ${runningPrio[0]} 0
 COUNT=0
 arrayPos=0
 currentTime=`date +%s`
-echo $middleUser
+echo $lowUser
 calculateWait "$lowUser"
 calculateStatistics ${runningPrio[$lowUserPos]} ${runningPrio[0]}
 
@@ -286,4 +289,11 @@ echo $middleUser
 calculateWait "$middleUser"
 calculateStatistics ${runningPrio[$userPos]} ${runningPrio[$lowUserPos]}
 
-
+lastUser=${#runningUsers[@]}
+lastUser=`expr $lastUser - 1`
+arrayPos=0
+currentTime=`date +%s`
+highUser=${runningUsers[$lastUser]}
+echo $highUser
+calculateWait "$highUser"
+calculateStatistics ${runningPrio[$lastUser]} 1
