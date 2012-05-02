@@ -104,6 +104,9 @@ done <<< "`condor_q -run | grep $1`"
 }
 
 calculateStatistics(){
+	echo $1
+	prio=`echo "$1 + 0" | bc -l`
+	echo $prio
 	totalWait=0
 for (( i=0;i<arrayPos-1;i++))
 do
@@ -111,14 +114,6 @@ do
 done
 if [ $arrayPos -gt 0 ]; then
 	avgWait=`expr $totalWait / $arrayPos`		# As stated earlier arrayPos is array length at end
-	check=`echo "($2+0.5)/1" | bc`
-	if [[ $check -eq 0 ]]; then
-		echo "If Effective Priority <= $1, the average wait is: $avgWait"
-	elif [[ $check -eq 1 ]]; then
-		echo "If Effective Priority > $1, the average wait is: $avgWait"
-	else
-		echo "If Effective Priority is > $2 and <= $1, the average wait is: $avgWait"
-	fi
 	bubblesort
 	let MODULUS=$arrayPos%2
 	if [ $MODULUS -eq 0 ]; then			# if number of jobs is even, take the average of 2 middle
@@ -126,13 +121,9 @@ if [ $arrayPos -gt 0 ]; then
 		highMid=${waits[$half]}
 		lowMid=${waits[$half-1]}
 		median=`echo "($highMid+$lowMid)/2" | bc -l`
-		echo "High Middle: $highMid"
-		echo "Low Middle: $lowMid"
-		echo "Median: $median"
 	else
 		let half=$arrayPos/2			# if number of jobs is odd, median is middle value
 		median=${waits[$half]}
-		echo "Median: $median"
 	fi
 
 	variance=0
@@ -141,11 +132,8 @@ if [ $arrayPos -gt 0 ]; then
 		lowerQuartilePos=`expr $arrayPos / 4`
 		let upperQuartilePos=$lowerQuartilePos*3
 		IQRlow=${waits[$lowerQuartilePos]}
-		echo "IQRlow: $IQRlow"
 		IQRhigh=${waits[$upperQuartilePos]}
-		echo "IQRhigh: $IQRhigh"
 		IQR=`expr $IQRhigh - $IQRlow`
-		echo "IQR: $IQR"
 		total=0
 		for (( count=lowerQuartilePos;count<upperQuartilePos;count++))
 		do
@@ -153,7 +141,6 @@ if [ $arrayPos -gt 0 ]; then
 		done
 		amount=`expr $upperQuartilePos - $lowerQuartilePos`
 		avgWait=`expr $total / $amount`
-		echo "IQR average wait: $avgWait"
 		for (( count=lowerQuartilePos;count<upperQuartilePos;count++))
                 do
                         temp=`expr ${waits[count]} - $avgWait`
@@ -181,9 +168,11 @@ if [ $arrayPos -gt 0 ]; then
 		stdDev=`echo "sqrt($variance)" | bc -l`
 		skew=`echo "($avgWait-$median)/$stdDev" | bc -l`
 	fi
+	echo $prio
 	echo "Variance: $variance"
 	echo "Standard Deviation: $stdDev"
 	echo "Pearson's Skew: $skew"
+	echo "$prio $avgWait $stdDev $median $skew $TOTAL $RUNNING $IDLE $HELD" >> /home/erasmussen/CondorScript/NN.txt
 else
 	exit 0
 fi
@@ -326,6 +315,7 @@ else
 		if [ $i -gt 0 ]; then
 			runningUsers[$runningUsersPos]=`echo ${user[$count]} | cut -d '@' -f1`
 			runningPrio[$runningPrioPos]=${priority[$count]} 
+			echo ${runningPrio[$runningPrioPos]}
 			userLow[$userLowPos]=`expr $totalJobs + 1`
 			let totalJobs+=$i
 			userHigh[$userHighPos]=$totalJobs
@@ -336,78 +326,17 @@ else
 		fi
 		let count+=1
 	done
-	count=0
-	for i in ${runningUsers[@]}
+	place=0
+	currentTime=`date +%s`
+	echo ${#runningUsers[@]}
+	for k in ${runningPrio[@]}
 	do
-		echo "$i ${runningPrio[$count]} ${userLow[$count]} ${userHigh[$count]}"
-		let count+=1
+		echo ${runningPrio[$place]}
+		echo "$k ${runningUsers[$place]} ${userLow[$place]} ${userHigh[$place]}"
+		COUNT=0
+	        arrayPos=0
+	        calculateWait ${runningUsers[$place]}
+	        calculateStatistics $k 0
+		let place+=1
 	done
-
-
-	let MODULUS=$totalJobs%2
-	if [ $MODULUS -eq 0 ]; then			# if number of jobs is even, take the average of 2 middle
-		let median=$totalJobs/2			# values to get the median
-		echo "Median Job Number: $median"
-	else
-		let half=$totalJobs/2			# if number of jobs is odd, median is middle value
-		median=$half
-		echo "Median Job Number: $median"
-	fi
-
-	count=0
-	lowUserPos=0
-	lowQuart=`expr $median / 2`
-	for i in ${runningUsers[@]}
-	do
-	        if [ ${userLow[$count]} -le $lowQuart ] && [ ${userHigh[$count]} -ge $lowQuart ]; then
-	                lowUser=$i
-	                lowUserPos=$count
-	        fi
-	        let count+=1
-	done
-	
-	count=0
-	userPos=0
-	for i in ${runningUsers[@]}
-	do
-		if [ ${userLow[$count]} -le $median ] && [ ${userHigh[$count]} -ge $median ]; then
-			middleUser=$i
-			userPos=$count
-		fi
-		let count+=1 
-	done
-
-	COUNT=0
-	arrayPos=0
-	currentTime=`date +%s`
-	echo ""
-	echo ${runningUsers[0]}
-	calculateWait ${runningUsers[0]}
-	calculateStatistics ${runningPrio[0]} 0
-
-	COUNT=0
-	arrayPos=0
-	currentTime=`date +%s`
-	echo ""
-	echo $lowUser
-	calculateWait "$lowUser"
-	calculateStatistics ${runningPrio[$lowUserPos]} ${runningPrio[0]}
-
-	COUNT=0
-	arrayPos=0
-	currentTime=`date +%s`
-	echo ""
-	echo $middleUser
-	calculateWait "$middleUser"
-	calculateStatistics ${runningPrio[$userPos]} ${runningPrio[$lowUserPos]}
-
-	lastUser=${#runningUsers[@]}
-	lastUser=`expr $lastUser - 1`
-	arrayPos=0
-	currentTime=`date +%s`
-	highUser=${runningUsers[$lastUser]}
-	echo ""
-	echo $highUser
-	calculateWait "$highUser"
-	calculateStatistics ${runningPrio[$lastUser]} 1
 fi
